@@ -1,0 +1,47 @@
+;Contrast changer
+;By Iambian Zenith
+
+#include "ti83plus.inc"
+.org userMem-2
+.db $BB,$6D
+
+;Ans==0, get contrast level. Result stored back in Ans
+;Ans== any other number, write contrast level. Theta= 0 to 38
+;
+;No error checking provided. Must provide correct input
+;or information written to LCD port may cause undesired
+;results.
+;
+programstart:
+ bcall(_RclAns)
+ ret c
+ bcall(_ConvOp1)
+ ld a,d
+ or e
+ jr nz,SetContrast
+ ld a,(contrast)
+ bcall(_SetXXOp1)
+ bcall(_StoAns)
+ ret
+SetContrast:
+ ld hl,theta
+ rst 20h
+ rst 10h
+ ret c
+ ex de,hl
+ rst 20h
+ bcall(_ConvOp1)
+ ld (contrast),a
+ add a,$D8
+ out ($10),a
+ ret
+ 
+theta: .db $00,$5B,$00,$00
+
+.echo "-----------------------\n"
+.echo "Prgm CONTRAST size: "
+.echo $-programstart
+.echo " bytes.\n"
+.echo "-----------------------\n"
+
+.end

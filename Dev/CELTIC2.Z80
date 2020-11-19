@@ -1,0 +1,604 @@
+;Celtic, by Iambian Zenith
+;Your "verbose" errorsystem included,
+;Read the ReadME file
+
+#include "ti83plus.inc"
+.org userMem-2
+.db $BB,$6D
+
+myflag equ asm_flag1
+HitEOF equ 0  ;EOF during getnextline reached
+HitSOF equ 1  ;SOF during getprevline reached
+HitEOL equ 2  ;End of line encountered
+GetNew equ 3  ;Newline at end if inserting instead of replacing
+NoNull equ 4  ;Do not invoke nullline error code if set
+Delete equ 5  ;Set to delete information only
+Hidden equ 6  ;is set if variable is "hidden"
+temp1  equ tempswaparea+00
+temp2  equ tempswaparea+02
+SOF    equ tempswaparea+04  ;2adr,1pg,1buf. start of file
+EOF    equ tempswaparea+08  ;ditto above. end of file
+curpos equ tempswaparea+12  ;... current cursor position. +3=0 if in RAM
+page   equ tempswaparea+16  ;Page number for when exiting or for var in arc
+stack  equ tempswaparea+17  ;2b stack address for restoring at end of prog
+pline  equ tempswaparea+19  ;2adr,1pg,1buf. Position of previously read line
+memdel equ tempswaparea+23  ;2bytes. Amount of data deleted
+memins equ tempswaparea+25  ;2bytes. Amount of data inserted. To be compared.
+
+;Notes: Str0=Programname, tAns=LineToLookFor
+;Error will output basic readable "::ERROR::" in str9
+;Otherwise, will output string that tTheta points to.
+
+;tTheta will contain instruction codes. 1=replace 2=insert
+;any other number will just read a line
+
+;(soon to be available)
+;Second revision of program, made to work better with
+;a smaller size, and utilizes Ans variable for num input
+
+;
+;
+programstart:
+ di
+ ld a,00011000b
+ ld (IY+myflag),a  ;set and reset flags
+ ld (stack),SP
+ ld hl,programend
+ push hl          ;putting address of EOF on stack for easy RET.
+ in a,(6)
+ ld (page),a
+ call gettheta
+ ld bc,0   ;for memdel variable replacement
+ jr z,continuemainjump
+jumpnode02:
+ dec e \ jp z,replaceline
+ push bc
+  push de
+   call getprogramname ;seeding HL and carry flag for routines. DE not needed.
+  pop de
+ pop bc
+ dec e \ jp z,insertline
+ dec e \ jp z,createforbiddenstring
+ dec e \ jr z,createforbiddenprog
+ dec e \ jr z,movebetweenmedium
+ dec e \ jr z,deletemyprogram
+ set Delete,(IY+myflag)
+ dec e \ jr z,jumpnode02+1
+ dec e \ jp z,outputstatus
+ dec e \ jr z,togglelock
+ dec e \ jr z,togglehidden
+ ret
+createforbiddenprog:
+ jr nc,Err.ProgIsFound
+ ld h,e   ;E set to zero in order to enter this routine so is safe to use
+ ld l,e   ; this side effect since aforementioned method is most optimum.
+ and $1F  ;A already set to var type
+ cp $15
+ jr z,$+6
+ bcall(_CreateProg)
+ ret
+ bcall(_CreateAppVar)
+ ret
+togglelock:
+ jr c,movebetweenmedium   ;error code
+ cp AppVarObj   ;A already set to var type
+ ret z
+ inc a
+ cp 7
+ jr nz,$+4
+ ld a,5
+ ld (hl),a
+ ret
+togglehidden:
+ jr c,movebetweenmedium   ;error code
+ ld de,-7
+ add hl,de
+ ld a,$40
+ cp (hl)
+ jr nc,$+4
+ ld a,-$40
+ add a,(hl)
+ ld (hl),a
+ ret
+Err.ProgIsFound:   call ProgramErr \ .db ":P>IS>FN"
+continuemainjump:
+ jr continuemain
+movebetweenmedium:
+ jp c,Err.PrgmNotFnd
+ bcall(_Arc_Unarc)
+ ret
+deletemyprogram:
+ jr c,movebetweenmedium
+ bcall(_DelVarArc)
+ ret
+continuemain:
+ res NoNull,(IY+myflag)
+ call getprogramans
+ jr z,getnumberoflines
+ call getthisline
+ push bc
+  push bc
+   ld hl,Str9
+   rst 20h
+   rst 10h
+   bcallnc(_DelVarArc)
+  pop hl
+  bcall(_CreateStrng)
+  inc de
+  inc de
+ pop bc
+ ld hl,(pline)
+ ld a,(pline+2)
+ out (6),a
+ call gethlinc
+ ld (de),a        ;possible optimization with LDI \ DEC HL. Find flag set if BC=0
+ inc de
+ dec bc
+ ld a,b
+ or c
+ jr nz,$-8   ;this section lifts the 255 byte per line limit
+ ret ;===================================
+getnumberoflines:
+ ld de,0
+ call getnextline
+ inc de
+ bit HitEOF,(IY+myflag)
+ jr z,getnumberoflines+3
+ ex de,hl
+ bcall(_SetXXXXOp2)
+ bcall(_Op2toOp1)
+ bcall(_ZeroOp2)
+ bcall(_StoTheta)
+Err.MillinSyil:   call ProgramErr \ .db ":NUMSTNG"
+
+getthisline:
+linetestloop:
+ ld (pline),hl  ;retrieve line prior to reading the line
+ in a,(6)
+ ld (pline+2),a
+ call getnextline
+ dec de
+ bit HitEOF,(IY+myflag)
+ jr nz,skiptestendsituation
+ ld a,d
+ or e
+ jr nz,linetestloop  ;if z, passes through next section to reach linetestloopend. Saves 2 bytes.
+skiptestendsituation:
+ ld a,d
+ or e
+ jr nz,Err.LineNotFound
+linetestloopend:
+ ld a,b
+ or c
+ ret nz
+ bit NoNull,(IY+myflag)
+ ret nz
+ call ProgramErr \ .db ":NULLSTR"
+
+Err.LineNotFound: call ProgramErr \ .db ":L>NT>FN"
+Err.StrNotFnd:    call ProgramErr \ .db ":S>NT>FN"
+Err.StrArchived:  call ProgramErr \ .db ":S>FLASH"
+
+getstr9:
+ ld hl,Str9
+ rst 20h
+ rst 10h
+ jr c,Err.StrNotFnd
+ ld a,b
+ or a
+ jr nz,Err.StrArchived  ;if archived, generate error
+ ex de,hl
+getsize:
+ ld c,(hl)
+ inc hl
+ ld b,(hl)
+ inc hl
+ ld a,c
+ or b
+ ret
+
+;Bytes for tokens. $3F=NewLine(hard-return) $3E=ColonChar(soft-return) - not used
+;HL=address. Does not use DE. Screws up BC
+;Positioned here to save a byte by the use of the JR instruction
+Err.EntryTooLong: call ProgramErr \ .db ":E>2>LNG"
+getnextline:
+; or a
+; res HitEOF,(IY+myflag)  ;========================
+ ld bc,0
+getnextlineloop:
+ push hl  ;old call for "checkposition"
+  push bc
+   ld bc,(EOF)
+   sbc hl,bc
+   jr nz,$+15  ;skip if address don't match
+   ld a,(EOF+2)
+   ld b,a
+   in a,(6)
+   cp b
+   jr nz,$+6  ;skip EOF reached set if page don't match (for multipage arced vars)
+   set HitEOF,(IY+myflag)
+  pop bc
+ pop hl
+ bit HitEOF,(IY+myflag)
+ ret nz
+ call getHLinc
+ cp $3F
+ ret z
+ inc bc
+; ld a,c
+; or b
+; jr z,Err.EntryTooLong
+ jr getnextlineloop
+CheckSize:
+ call getstr9
+ jr z,Err.NullVar
+ ld h,b
+ ld l,c
+ inc hl
+ bcall(_EnoughMem)
+ jr c,Err.EntryTooLong
+ ret
+
+getprogramname:
+ ld hl,Str0
+ call getstr9+3  ;skip over the "LD HL,Str9" part
+ jr z,Err.NullVar  ;Str0 is null. Cannot accept input.
+ ex de,hl
+ ld hl,-22
+ add hl,bc  ;Can't be too long.
+ jr c,Err.StrTooLong
+ ld hl,Op1
+ ld a,(de)
+ cp $15   ;rowSwap( token equates to AppVar type
+ jr z,$+5  ;jump over in order to copy in the type byte as well
+ ld (hl),$05  ;Prog obj (not protected)
+ inc hl
+ ex de,hl
+getprognamesubloop:
+ ld a,(hl)
+ inc hl
+ cp $BB
+ jr nz,getprognameminloop  ;2bytetok skip if not found.
+ ld a,(hl)
+ inc hl
+ dec bc
+ cp $BB  ;byte not used, see above
+ jr c,$+3 ;because of that, if less than that num, do not alter num
+ dec a
+ sub $B0-$61  ;decrease by appropriate number of bytes. Yeah.
+getprognameminloop:
+ ld (de),a
+ inc de
+ dec bc
+ ld a,b
+ or c
+ jr nz,getprognamesubloop
+ xor a   ;program would not reach this point if A wasn't zero. See "LD A,B" earlier.
+ ld (de),a    ;clear out next byte for null-terminated string
+ bcall(_ChkFindSym) ;check for program with name retrieved from Str0
+ jr nc,$+18      ;skip if program info is found. Else, search for hidden
+ ld hl,Op1+1
+ ld a,(hl)
+ add a,-$40
+ ld (hl),a
+ bcall(_ChkFindSym)
+ jr c,$+6
+ set Hidden,(IY+myflag)
+ ld a,(hl)
+ ret
+Err.StrTooLong:   call ProgramErr \ .db ":S>2>LNG"
+Err.NullVar:      call ProgramErr \ .db ":NULLVAR"
+getprogram:  ;outputs and resets vectors for program data using Str0 stuffs.
+ call getprogramname
+ jr c,Err.PrgmNotFnd    ;kill program with this error if program is not found
+ ex de,hl
+ ld a,b
+ out (6),a
+ or a
+ jr z,$+17  ;skip if already unarchived
+ ld de,9        ;3
+ call addDEtoHL ;3
+ call getHLinc  ;3
+ ld e,a         ;1
+ ld d,0         ;2
+ call addDEtoHL ;3 = 15
+ call getHLinc
+ ld e,a
+ call getHLinc
+ ld d,a
+ ld (SOF),hl   ;address
+ in a,(6)
+; ld (SOF+2),a  ;page
+ push af
+  push hl
+   call addDEtoHL  ;add in size and compensate for page stuffs if in Flash
+   ld (EOF),hl   ;address
+   in a,(6)
+   ld (EOF+2),a  ;page
+  pop hl
+ pop af
+ out (6),a
+ ret
+Err.PrgmNotFnd:   call ProgramErr \ .db ":P>NT>FN"
+Err.IsArchived:   call ProgramErr \ .db ":PGM>ARC"
+;=====================================================================
+deleteFix:
+ bit HitEOF,(IY+myflag)
+ jr nz,$+4
+ inc bc  ;delete the next newline character to move next line into this one if there is one.
+ inc de
+ ld a,b
+ or c
+ jr z,Err.NullLine
+ push bc
+  bcall(_DelMem)
+  call getprogram
+ pop bc
+ ld a,c
+ cpl
+ ld c,a
+ ld a,b
+ cpl
+ ld b,a
+ inc bc  ;NEG BC. HL-BC = HL+-BC
+ jp updateSizeWithBC+1  ;=================================
+ 
+Err.NullLine:     call ProgramErr \ .db ":NULLINE"
+
+replaceline:
+ call checksize
+ res GetNew,(IY+myflag)
+ call getprogramans
+ in a,(6)
+ or a
+ jr nz,Err.IsArchived
+ call getthisline  ;BC=line length. IX=endOfBuffer
+ ld hl,(pline)
+ ld e,c
+ ld d,b  ;Memory to delete is taken in DE
+ bit Delete,(IY+myflag)
+ jr nz,DeleteFix
+ ld a,e
+ or d
+ jr z,insertline  ;HL=addy [DE,BC]=#toDelete
+ push bc
+  push de
+   push hl
+    call getstr9      ;HL=adr, BC=size
+    jp z,Err.NullVar  ;Stop program if null variable exists; nothing to insert.
+   pop hl
+  pop de
+  bcall(_DelMem)  ;BC does not stay intact, nor does it reflect what docs say
+ pop bc
+;insert program size updating routines here 
+; 
+insertline:
+ push bc
+  bit GetNew,(IY+myflag)
+  call nz,checksize   ;check size if calling from insertline. Otherwise, don't want to check memory when the VAT's not been updated.
+  call getprogramans
+  call getthisline  ;scan file. (pline)=SOL
+  call getstr9      ;HL=adr, BC=size
+  jp z,Err.NullVar  ;Stop program if null variable exists; nothing to insert.
+  push bc           ;save size of string to insert
+   ld de,(pline)     ;Get address of SOL in DE
+   ld h,b            ;BC -> HL
+   ld l,c
+   bit GetNew,(IY+myflag)  ;set if inserting line
+   jr z,$+3
+   inc hl   ;increasing for added $3F
+   bcall(_InsertMem) ;HL=numbytestoinsert, DE=Address of insertion
+   ld de,(SOF)
+  pop hl   ;HL=bytestoinsert DE=adr
+ pop bc    ;BC=replacement for (memdel).
+ or a
+ sbc hl,bc  ;insert-subtract
+ ld c,l
+ ld b,h
+ bit GetNew,(IY+myflag)
+ jr z,$+3
+ inc bc
+;HL=JUNK DE=ADDY BC=sizeupdate
+ call updatesizewithBC
+ call getans
+ call getthisline
+ call getstr9   ;should insert as much as Str9 has
+ ld de,(pline)
+ ldir
+ bit GetNew,(IY+myflag)
+ jr z,$+5
+ ld a,$3F
+ ld (de),a
+ ret
+ProgramErr:  ;HL already pushed by the call
+ call makestring
+ pop hl
+ ldir
+programend:
+ ld SP,(stack)
+ ld a,(page)
+ out (6),a
+ ret
+
+makestring:
+ ld hl,Str9
+ rst 20h
+ rst 10h
+ bcallnc(_DelVarArc)
+ ld hl,8
+ push hl
+  bcall(_CreateStrng)
+ pop bc
+ inc de
+ inc de
+ ret
+createforbiddenstring:
+ call makestring
+ ex de,hl
+ ld (hl),$04  ;STO sym
+ inc hl
+ ld (hl),$2A  ;dblquote sym
+ ret   ;================================
+ 
+getHLinc:
+ ld a,(hl)
+IncHL:
+ bit 7,h
+ inc hl
+ ret nz
+ bit 7,h
+ ret z
+ push af
+  in a,(6)
+  inc a
+  out (6),a
+ pop af
+ res 7,h
+ set 6,h
+ ret
+addDEtoHL:   ;cares for >16384 possibility. Overglorified ADD HL,DE wrt/ pages
+ bit 7,h
+ push af
+  jr nz,addDEtoHLskip
+  ld a,d
+  rlca
+  rlca
+  and 00000011b  ;get two MSbits of H, and add to page with that
+  push bc
+   ld b,a
+   in a,(6)
+   add a,b
+   out (6),a
+  pop bc
+  res 7,d
+  res 6,d
+addDEtoHLskip:
+  add hl,de
+ pop af
+ jr IncHL+3  ;optimizing in space by reusing an old checking routine
+ 
+getprogramans:  ;
+ call getprogram ;continue further for getans part of program
+getans:
+ push hl
+  bcall(_RclAns)  ;obtain ANS var for line input.
+  bcall(_ConvOp1)
+ pop hl
+ ld a,e
+ or d   ;# of lines to go thru in DE
+ ret
+gettheta:
+ push hl
+  push bc
+   ld hl,theta
+   rst 20h
+   rst 10h
+   jr c,Err.ThetaNotFnd
+   ld a,b
+   or a
+   jr nz,Err.ThetaNotFnd
+   ex de,hl
+   rst 20h
+  pop bc
+  jr getans+4  ;continue with ConvOp1 call in previous routine
+Err.ThetaNotFnd:  call ProgramErr \ .db ":T>NT>FN"
+UpdateSizeWithBC: ;DE=addy BC=sizeupdate
+ ex de,hl
+ dec hl
+ ld d,(hl)  ;extract size to BC
+ dec hl
+ ld e,(hl)
+ ex de,hl   ;HL=bytestoinsertfixed DE=adr
+ add hl,bc  ;fixed address
+ ex de,hl   ;HL=adr DE=fixedsizefield
+ ld (hl),e  ;load size field with updated size
+ inc hl
+ ld (hl),d
+ inc hl
+ ret
+outputstatus:
+;output: "1234XXXXX"
+;1= A/R Arc/RAM
+;2= L/W/P Lock/Writable/appvar
+;3= H/V   Hidden/Visible
+;4= Reserved (space)
+;XXXXX = five digit size
+;
+ call makestring  ;output: DE=addy
+ push de
+  call getprogram
+ pop hl
+ in a,(6)
+ ld bc,$4152 ;C='A' B='R'
+ jp m,$+5
+ ld b,'E'    ;If in ExRAM, "E"
+ call LoadBIncOnZero
+ ld bc,$4856 ;'V'+(256*'H')
+ bit Hidden,(IY+myflag)
+ call LoadBIncOnZero
+ ld a,(Op1)
+ ld bc,$4C57 ;'L'+(256*'W')
+ ld (hl),'P'
+ cp AppVarObj
+ call z,LoadBIncOnZero+4
+ jr z,$+7
+ cp $05
+ call LoadBIncOnZero
+; ld (hl),$29  ;BASIC space token
+ ld b,5
+ ld (hl),'O'
+ inc hl
+ djnz $-3   ;setting to numerical string zero
+ dec hl
+ ex de,hl
+ push de
+  bcall(_SetXXXXOp2)
+  bcall(_Op2toOp1)
+  ld a,6
+  bcall(_FormEReal)
+ pop de
+ ld hl,OP3-1
+ add hl,bc  ;BC=string size
+ lddr
+ ret  ;==================================
+LoadBIncOnZero:
+ ld (hl),c
+ jr z,$+3
+ ld (hl),b
+ inc hl
+ ret
+ 
+; 
+;debug:
+; push hl \ push bc \ push de \ push af
+; push ix \ push hl \ push de \ push bc \ push af
+;; ld hl,0 \ ld (currow),hl
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;AF
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;BC
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;DE
+; bcall(_NewLine)
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;HL
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;IX
+; ld hl,0 \ add hl,sp \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;SP
+; bcall(_NewLine)
+; in a,(4)
+; bit 3,a
+; jr nz,$-4   ;keeps program from moving anywhere
+; in a,(4)
+; bit 3,a
+; jr z,$-4   ;keeps program from moving anywhere
+; pop af \ pop de \ pop bc \ pop hl
+; ret
+;#include "R/_hex.z80"
+
+Str0:  .db $04,$AA,$09,$00
+Str9:  .db $04,$AA,$08    ;taking cheap way out by using first $00 in theta name as null terminator
+theta: .db $00,$5B,$00,$00
+
+.echo "-----------------------\n"
+.echo "Prgm CELTIC2 size: "
+.echo $-programstart
+.echo " bytes.\n"
+.echo "-----------------------\n"
+
+.end

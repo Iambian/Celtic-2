@@ -1,0 +1,48 @@
+editrule1a: .db 5,6 \ .dw ercoll1,ercoll1,ercoll1,ercoll1,ercoll1,editrule2,returncollector
+editrule1b: .db 1,8,40,52
+            .db " Seeds",10,0
+            .db " Serviettes",10,0
+            .db " Flakes",10,0
+            .db " Gnarl",10,0
+            .db " Maze",10,0
+            .db " NEXT",10,0
+            .db " EXIT",10,0
+
+editrule2a: .db 6,6 \ .dw ercoll2,ercoll2,ercoll2,ercoll2,ercoll2,editrule3,editrule1
+editrule2b: .db 4,9,44,53
+            .db " 2x2",10,0
+            .db " Replicator",10,0
+            .db " Amoeba",10,0
+            .db " Life",10,0
+            .db " High Life",10,0
+            .db " NEXT",10,0
+            .db " PREV",10,0
+
+editrule3a: .db 7,6 \ .dw ercoll3,ercoll3,ercoll3,ercoll3,ercoll3,editrule4,editrule2
+editrule3b: .db 7,10,54,54
+            .db " Walled Cities",10,0
+            .db " Stains",10,0
+            .db " Coagulations",10,0
+            .db " PseudoLife",10,0
+            .db " Move",10,0
+            .db " NEXT",10,0
+            .db " PREV",10,0
+
+editrule4a: .db 8,6 \ .dw ercoll4,ercoll4,ercoll4,ercoll4,ercoll4,editrule5,editrule3
+editrule4b: .db 10,11,59,55
+            .db " 34Life",10,0
+            .db " Day And Night",10,0
+            .db " Assimilation",10,0
+            .db " Coral",10,0
+            .db " Long Life",10,0
+            .db " NEXT",10,0
+            .db " PREV",10,0
+
+editrule5a: .db 9,3 \ .dw ercoll5,ercoll5,editrule5,editrule4
+editrule5b: .db 13,19,69,13
+            .db " Diamoeba",10,0
+            .db " Custom Ruleset",10,0
+            .db " EXIT",10,0
+            .db " PREV",10,0
+
+

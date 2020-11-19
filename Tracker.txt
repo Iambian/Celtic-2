@@ -1,0 +1,30 @@
+getprogram: CHK
+>> Vectors, HL=adr, (6)=pg
+
+getans:     CHK
+>> DE=Ans, sees if DE==0
+Preserves HL, destroys BC
+
+getthisline:
+<< DE=getthisline
+>> HL=NextLine
+>> (pline)=PreviousLine
+>> DE=0
+>> C=lengthofline, destr "B"
+
+
+getstr9:
+>> HL=Adr,BC=Siz,F=isHLzero
+
+_insertmem:
+<< HL=#ofbytes DE=Adr
+>> DE=pointofinsertion
+
+_delmem
+<< HL=adr DE=#ofbytes
+>> DE=intact BC=amt deleted
+
+checksize:
+ERR if not enough mem
+
+

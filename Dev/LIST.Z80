@@ -1,0 +1,224 @@
+;List -> String conversion utility.
+;Converts string into a format that
+;would be usable in CELTIC2 in
+;conjunction with string modification
+;and program/appvar writing.
+;Str0 = input name of list
+;Str9 = output string data
+;
+#include "ti83plus.inc"
+.org $9D93
+.dw  $6DBB
+stack equ appbackupscreen+12
+programstart:
+ ld (stack),SP            ;save the stack position in case of abnormal exit
+ ld hl,Str0               ;modify input to Str0 instead of Str9
+ call RecallString+3      ;and pass that into the recall string routine
+ jr c,Err.StringNotFound  ;issue error if string not found
+ or a                     ;checking if A is zero (archived status)
+ jr nz,Err.Archived       ;issue error if string is archived
+ ld de,Op1                ;DE=Op1 for writing to
+ ld a,$01                 ;$01 for var type "List"
+ ld (de),a                ;save var type
+ inc de                   ;increment pointer
+ ld a,c                   ;checking size of string
+ or b                     ;to make sure it isn't zero
+ jr z,Err.NullString      ;Issue error if the string is null.
+ ld a,6                   ;6-VAR.
+ cp c                     ;Perform comparison
+ jr c,Err.EntryTooLong    ;Issue error if string is longer than allowed input.
+ xor a                    ;Clear A out
+ cp b                     ;Make sure that B is clear
+ jr nz,Err.EntryTooLong   ;Issue error if B is not zero
+ ldir                     ;copy string in HL to DE (Op1+1) by BC
+ ld (de),a                ;clear next byte in DE out (A set to zero earlier)
+ ld a,$5D
+ ld (Op1+1),a
+ call saveslot1           ;load OP1 to appbackupscreen to save name.
+ call recallList          ;get address and size of list
+ jr c,Err.ListNotFound    ;issue error if list is not found
+ or a                     ;check archive status (in A)
+ jr nz,Err.Archived       ;issue error if list is archived
+ ld a,b                   ;checking if list size field
+ or c                     ;is zero.
+ jr z,Err.NullList        ;Issue error if list is null.
+ ld hl,Str9
+ rst 20h \ rst 10h
+ jr c,$+5                 ;If it does not exist, skip to creating string.
+ bcall(_DelVarArc)        ;delete existing Str9 vars
+ call RecallList          ;getlist. HL=address, BC=sizeOfList
+ ld de,1                  ;To get size of new string initial open bracket sign
+ jr GetSizeLoop           ;skip error code series
+ 
+Err.NullString:     call ProgramErr \ .db ":1"
+Err.StringNotFound: call ProgramErr \ .db ":2"
+Err.EntryTooLong:   call ProgramErr \ .db ":3"
+Err.ListNotFound:   call ProgramErr \ .db ":4"
+Err.NullList:       call ProgramErr \ .db ":5"
+Err.TooSmall:       call ProgramErr \ .db ":6"
+Err.Archived:       call ProgramErr \ .db ":7"
+
+;Input: HL=list address, BC=iterations Output: DE=Size
+GetSizeLoop:
+ push bc         ;save iterations
+  push hl        ;save list address
+   push de       ;save size information
+    call ConvHLToString  ;Op2 modified as size delimited string.
+    ld de,(Op2)  ;retrieve size from Op2 (D is junk)
+   pop hl        ;restore size as HL
+   ld d,0        ;clear out MSB; it contains junk data.
+   inc e         ;increase for included comma symbol
+   add hl,de     ;add size of string and size of Op2 together
+   ex de,hl      ;put size back into DE
+  pop hl         ;restore list address
+  ld bc,9        ;set list size to
+  add hl,bc      ;increase by 9
+ pop bc          ;restore iterations
+ dec bc          ;minus one
+ ld a,b          ;checking if
+ or c            ;BC is zero
+ jr nz,GetSizeLoop  ;keep looping if it isn't
+;DE=size, HL=trash, BC=0
+ push de         ;save string size information
+  ld hl,Str9     ;get Str9 info
+  rst 20h        ;put Str9 name into HL
+ pop hl          ;restore string size info as HL
+ bcall(_createStrng)  ;creating string with the size specified by previous routine
+ ex de,hl        ;HL=address
+ inc hl          ;increment twice
+ inc hl
+ ld (hl),$08     ;To writable byte, add open bracket
+ inc hl          ;to next address
+ push hl           ;save address of string
+  call RecallList  ;get address of list. HL=address, BC=size
+ pop de            ;address of string
+;HL=listaddress, DE=stringaddress, BC=iterations
+lookuplist:
+ push bc      ;save iterations of list
+  push hl
+   push de
+    call ConvHLToString
+   pop de
+   ld hl,Op2
+   ld c,(hl)
+   ld b,0
+   inc hl
+   ldir
+   ld a,$2B
+   ld (de),a  ;comma thingie
+   inc de
+  pop hl
+  ld bc,9
+  add hl,bc  ;to next list element
+ pop bc
+ dec bc
+ ld a,b
+ or c
+ jr nz,lookuplist
+ dec de
+ ld a,$09
+ ld (de),a  ;closing brackets
+ProgramEnd:
+ ld SP,(stack)
+ ret
+ConvHLToString:
+ ld de,Op2
+ ld c,(hl)
+ inc hl
+ ld a,(hl)
+ inc hl
+ sub $80
+ jr c,Err.TooSmall
+ inc a
+ bit 7,c
+ jr z,$+3
+ inc a      ;for negative symbol
+ ld (de),a
+ inc de
+ bit 7,c
+ jr z,$+7
+ ld a,tChs  ;negative symbol
+ ld (de),a
+ inc de
+ ld b,a
+ConvOp1Loop:
+ ld a,(hl)
+ rlca \ rlca \ rlca \ rlca
+ and $0F
+ add a,$30
+ ld (de),a
+ inc de
+ dec b
+ ret z
+ ld a,(hl)
+ and $0F
+ add a,$30
+ ld (de),a
+ inc de
+ inc hl
+ djnz ConvOp1Loop
+ ret
+
+Recallstring:
+ ld hl,Str9
+ rst 20h
+ rst 10h
+ ld a,b
+ ex de,hl
+ ld c,(hl)
+ inc hl
+ ld b,(hl)
+ inc hl
+ ret
+RecallList:
+ ld hl,appbackupscreen
+ rst 20h
+ bcall(_ChkFindSym)
+ jr Recallstring+5
+saveslot1:
+ ld de,appbackupscreen
+ ld hl,Op1
+ ld bc,9
+ ldir
+ ret
+
+ProgramErr:  ;HL already pushed by the call
+ ld hl,Str9
+ rst 20h
+ rst 10h
+ bcallnc(_DelVarArc)
+ ld hl,2
+ push hl
+  bcall(_CreateStrng)
+ pop bc
+ pop hl
+ inc de
+ inc de
+ ldir
+ jr programend  ; reusing "jp programend" jump found just above. Don't move this.
+; 
+;debug:
+; push hl \ push bc \ push de \ push af
+; push ix \ push hl \ push de \ push bc \ push af
+;; ld hl,0 \ ld (currow),hl
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;AF
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;BC
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;DE
+; bcall(_NewLine)
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;HL
+; pop hl \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;IX
+; ld hl,0 \ add hl,sp \ call convertHtoT2b \ ld de,$0020 \ ld (Op6+4),de \ ld hl,Op6 \ bcall(_PutS) ;SP
+; bcall(_NewLine)
+; in a,(4)
+; bit 3,a
+; jr nz,$-4   ;keeps program from moving anywhere
+; in a,(4)
+; bit 3,a
+; jr z,$-4   ;keeps program from moving anywhere
+; pop af \ pop de \ pop bc \ pop hl
+; ret
+;#include "R/_hex.z80"
+Str0:  .db $04,$AA,$09,$00
+Str9:  .db $04,$AA,$08,$00
+
+.end

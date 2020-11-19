@@ -1,0 +1,62 @@
+#define inc_helpsys.z80
+HelpSys.z80:
+;The help system's been stripped down to only the initial "HELP" selection on main menu.
+HelpSys.Manual:
+ ld hl,HelpID.Manual
+ ld b,(hl)
+ inc hl
+HelpSysInLoop:
+ push bc
+  push hl
+   xor a
+   ld hl,HelpTopics
+   call dispdialog   ;flash black the "Help topics" dialog box
+  pop hl
+  ld a,$FF
+  ld de,$0011
+  ld bc,$5F37
+  call dispdialogcont
+  push hl
+   ld a,1
+   ld hl,HelpTopics
+   call dispdialog
+  pop hl
+ pop bc
+ call pressanykey
+ djnz HelpSysInLoop
+ call clearcenter
+ ret
+
+HelpTopics:
+.db 0,8,41,16," Help topics",0,0
+;formatted menu system material. Preceding byte is #ofpages
+;==========================================
+;The following help entry is invoked when
+;you choose the menu item on the main menu.
+;All other entries are based on the menuID
+;
+HelpID.Manual:
+.db 3
+.db "This is a Celluar Automata",10
+.db "program that plays on",10
+.db "Conways Game of Life.",10
+.db "Using the available options,",10
+.db "you can generate your own",10
+.db "patterns... (NEXT PAGE)",0,0
+
+.db "on the graph screen. While",10
+.db "graphing, the controls are",10
+.db "DEL:Halt program",10
+.db "MODE:Return to main menu",10
+.db "+or-:Nothing yet",10
+.db "2ND:Next iteration(NXT PG)",0,0
+
+.db "By exiting to the main menu",10
+.db "you are able to save your",10
+.db "current progress into a",10
+.db "picture file by selecting",10
+.db "the appropriate menu item",0,0
+
+.echo "Module _HELPSYS size is "
+.echo $-helpsys.z80
+.echo " bytes\n"

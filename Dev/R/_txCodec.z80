@@ -1,0 +1,30 @@
+#define inc_txCodec.z80
+txCodec.z80:
+VPutS2:    ;includes LineFeed possibility
+ push af
+  ld a,(hl)
+  inc hl
+  or a
+  jr z,VPutSExit2
+  cp 10    ;linefeed  (no carriage return. Just LF)
+  jr nz,VPutSExit2-5
+  ld a,(textMem+1)
+  add a,6
+  ld (textMem+1),a    ;same as it always was.
+  ld a,(textmargin)
+  ld (textMem),a
+  jr $+5          ;jump over displaying and move on to next character.
+  call VPutMap
+  jr VPutS2+1  ;stack doesn't corrupt by repeately pushing if jr to beginning
+VPutSExit2:
+  pop af
+; call fastCopy
+ ret
+;NewLine:
+; ld hl,NL
+; call VPutS2
+; ret
+;NL: .db 10,0
+.echo "Module _TXCODEC size is "
+.echo $-txCodec.z80
+.echo " bytes\n"

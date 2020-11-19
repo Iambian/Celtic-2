@@ -1,0 +1,109 @@
+#define inc_getKbd.z80
+getKbd.z80:
+;Old code. Restore if new code doesn't work.
+_getKBD:  ;destroys registers AF and BC
+ xor a
+ call getKBDSC.1
+ xor $FF
+ ret z
+ ld bc,$7F00
+getKBDSC.2:
+ rlc b
+ ld a,b
+ bit 7,a
+ jr z,getKBDSC.E
+ call getKBDSC.1
+ cp $FF
+ jr nz,getKBDSC.3
+ ld a,8
+ add a,c
+ ld c,a
+ jr getKBDSC.2
+getKBDSC.3:
+ inc c
+ rrca
+ jr c,$-2
+ set 7,a
+ cp $FF
+ jr nz,getKBDSC.E  ;Checking all keys in this group.
+getKBDSC.4:        ;Checking all other groups for keypress.
+ rlc b
+ ld a,b
+ jr nc,getKBDSC.5
+ call getKBDSC.1
+ cp $FF
+ jr nz,getKBDSC.E
+ jr getKBDSC.4
+getKBDSC.5
+ ld a,c
+ ret
+getKBDSC.E:
+ xor a
+ scf
+ ret
+getKBDSC.1:
+ out (1),a
+ push af
+ pop af
+ in a,(1)
+ push af
+  ld a,$FF
+  out (1),a
+ pop af
+ ret
+
+;_getKBD:  ;destroys registers AF and BC
+; xor a
+; call getKBDSC.1
+; xor $FF
+; ret z
+; ld bc,$7F00
+;getKBDSC.2:
+; rlc b
+; ld a,b
+; bit 7,a
+; jr z,$+39
+; call getKBDSC.1
+; cp $FF
+; jr nz,$+8
+; ld a,8
+; add a,c
+; ld c,a
+; jr $-18
+;getKBDSC.3:
+; inc c
+; rrca
+; jr c,$-2
+; set 7,a
+; cp $FF
+; jr nz,$+18        ;Checking all keys in this group.
+;getKBDSC.4:        ;Checking all other groups for keypress.
+; rlc b
+; ld a,b
+; jr nc,$+11
+; call getKBDSC.1
+; cp $FF
+; jr nz,$+6
+; jr $-12
+;getKBDSC.5
+; ld a,c
+; ret
+;getKBDSC.E:
+; xor a
+; scf
+; ret
+;getKBDSC.1:
+; out (1),a
+; push af
+; pop af
+; in a,(1)
+; push af
+;  ld a,$FF
+;  out (1),a
+; pop af
+; ret
+
+ 
+.echo "Module _GETKBD  size is "
+.echo $-getKbd.z80
+.echo " bytes\n"

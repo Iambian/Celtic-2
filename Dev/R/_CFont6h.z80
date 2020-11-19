@@ -1,0 +1,959 @@
+#define inc_CFont6h.z80
+CFont6h.z80:
+;Extra note: this program was tested on 475138 iterations, over 5 hours of continuous running!
+;Note: TextFlags=5, so been replaced. textInverse=3, so been replaced. For TI-83 Plus. (or SE)
+;Note: bit 6 on textFlags are used temporarily for clip protection
+;This routine disables interrupts and destroys shadow AF and HL. Naw, not really, but interrupts are gone.
+;#include "ti83plus.inc"
+;.org $9D93
+;.dw  $6DBB
+;#define equ .equ
+;#define EQU .equ
+TxtTemp1  equ  temp1        ;2 bytes of temporary swapping. In tempSwapArea RAM.
+TxtTemp2  equ  TxtTemp1+2   ;2 bytes to save IX temporarily in tilemap thingie.
+fontFile  equ  TxtTemp2+2   ;for text or sprite bitmap data loading.
+scrnBuf   equ  $9340        ;screen buffer may change. plotSScreen area.
+textMem	  equ  $86D7        ;redefined penCol
+clipTxt   equ  $05          ;allow clipping on bottom and right edge.
+thinTxt   equ  $00          ;user-defined flag in textFlags offset. Used to reduce eliminate space between characters. (varWidth-1)
+;textFlags	EQU    5	;Text output flags
+;textEraseBelow	EQU    1	; 1=erase line below small char
+;textScrolled	EQU    2	; 1=screen scrolled
+;textInverse	EQU    3	; 1=display inverse bit-map
+;textInsMode	EQU    4	; 0=overstrike, 1=insert mode
+textEraseAbove EQU    7    ; 1=erase line above small char (custom-made for routine)
+;bit 5 used as textsize shortener.
+;See in title for details on bit 6
+#ifndef inc_fastcopy.z80
+fastCopy:
+ di
+ exx
+ ld	a,$80				; 7
+ out	($10),a				; 11
+ out	($20),a				; 11  Sets first two bits to zero to slow calc down if 83pse/84xx
+ ld	hl,scrnBuf-12-(-(12*64)+1)	; 10
+ ld	a,$20				; 7
+ ld	c,a				; 4
+ inc	hl				; 6 waste
+ dec	hl				; 6 waste
+fastCopyAgain:
+ ld	b,64				; 7
+ inc	c				; 4
+ ld	de,-(12*64)+1			; 10
+ out	($10),a				; 11
+ add	hl,de				; 11
+ ld	de,10				; 10
+fastCopyLoop:
+ add	hl,de				; 11
+ inc	hl				; 6 waste
+ inc	hl				; 6 waste
+ inc	de				; 6
+ ld	a,(hl)				; 7
+ out	($11),a				; 11
+ dec	de				; 6
+ djnz	fastCopyLoop			; 13/8
+ ld	a,c				; 4
+ cp	$2B+1				; 7
+ jr	nz,fastCopyAgain		; 10/1
+ exx
+ ret
+#endif
+VPutS:  ;displays null-terminated string.
+ push af
+  ld a,(hl)
+  inc hl
+  or a
+  jr z,VPutSExit
+  call VPutMap
+ pop af
+ jr VPutS
+VPutSExit:
+ pop af
+ ret
+VPutMap: ;displays character at (HL)
+ push hl
+  push bc
+   push de  ;although IX is destroyed, it appearently is not used in the project at critical times
+    call VPutMapper ;text ability writer found here.
+   pop de
+  pop bc
+ pop hl
+ ret
+;VPutSN:  ;displays a string of length B
+; push bc
+;VPutSNLoop:
+;  push af
+;   ld a,(hl)
+;   inc hl
+;   call VPutMap
+;  pop af
+;  djnz VPutSNLoop
+; pop bc
+; ret
+;
+VPutMapper:
+ ld de,textData-192
+ ld (fontFile),de
+ ld b,5  ;loops to display. Believe it or not, this variable is not destroyed between now and the time the sprite routine starts up. Allows room for change.
+;B is not incremented here for TextEraseBelow because that will be handled separately (after iterations end)
+ bit 7,(IY+5)  ;custom: TextEraseAbove
+ jr z,$+3
+ inc b
+SpriteJumpSkip:  ;for nontext sprites. put 8->B and x,y pos->penCol,penRow. Sprite must have a leading byte of 8. 0->A. spriteDatAdr->DE->(fontFile). set 5,(IY+5). Set other flags accordingly.
+ ld l,a
+ ld h,$0
+ add hl,hl
+ ld e,l
+ ld d,h
+ add hl,hl
+ add hl,de  ;*6
+ ld de,(fontFile)
+ add hl,de ;offset to datatable.
+ push HL
+ pop IX   ; HL->IX
+ ld a,$FF ;determining bitmask by...
+ push bc
+  ld b,(IX+0) ;will need this IX again.
+MaskLooper:
+  srl a
+  djnz MaskLooper
+ pop bc
+ ld (TxtTemp1),a    ;TxtTemp1=bitmask.
+ ld hl,(textMem)  ;L=X, H=Y for this...
+ ld a,(IX+0)
+ bit thintxt,(IY+5)
+ jr z,$+3 ;jump if not set.
+ dec a  ;reduce space.
+ inc IX   ;now it can be incremented safely. (increment from size byte to data)
+ add a,L  ;currow pos, plus text.
+ ld (textMem),a  ;updated anyway. Will test to quit.
+ cp 97       ;adjusted to go right up to the edge of the screen
+ ret nc ;kills program if too big for screen.
+ bit clipTxt,(IY+5)
+ jp nz,ClipCalc  ;works for up/down clipping.
+ ld a,H
+ cp 58  ;experimental low
+ ret nc ;kills program if too low for screen.
+doneClipCalc:
+ ld a,L
+ ld L,H
+ ld h,$0
+ add hl,hl
+ add hl,hl
+ ld d,h
+ ld e,l
+ add hl,hl
+ add hl,de
+ ld de,scrnBuf
+ add hl,de  ;Now has screenOffset
+ ld e,a
+ xor a  ;kills A for later shift
+ srl e
+ rra
+ srl e
+ rra
+ srl e
+ rra
+ rlca
+ rlca
+ rlca ;the remainder of E, E divided by 8.
+ ld (TxtTemp1+1),a ;TxtTemp1+1=shiftByThis#
+ res 6,(IY+5)
+ ld a,11
+ cp e
+ jr nz,$+6    ;jumps past ...
+ set 6,(IY+5) ;...provided this is four bytes in length.
+ ld d,$0
+ add hl,de  ;HL + Xoffset = pointer to start insertting text.
+;NOTE:insert value to increment for EraseLineBelow flag
+ di               ;exchanging shadow registers requires NO interrupts.
+ ld c,(IY+5)      ;C is not disturbed as B is. Reading from this is faster than constantly reading from IY
+;base B=5.
+TextDispLoop:
+ bit 7,c          ;TextEraseAbove
+ jr z,TextSkip01
+ ld a,6
+ cp b
+ jr nz,TextSkipSub01
+ ld (TxtTemp2),IX
+ ld ix,nullPadByte
+ jr TextSkip01
+TextSkipSub01:
+ ld a,5
+ cp b
+ jr nz,TextSkip01
+ ld ix,(TxtTemp2)
+TextSkip01:
+ push bc
+  ld bc,(TxtTemp1)  ;shiftbythis#->B already.
+  ld a,c
+  ld d,$FF        ;AD=maskshift. CE=spriteshift. B=looper. Hey! I just made up my own register pairs!
+  ld e,0
+  ld c,(IX+0)
+  dec b
+  inc b  ;to set zero flag if so...
+  jr z,noJumpShifter
+TextShiftLoop:
+  scf
+  rra   ;A=LSB mask
+  rr D  ;D=MSB mask
+  srl C ;C=LSB sprt
+  rr E  ;E=MSB sprt
+  djnz TextShiftLoop
+noJumpShifter:
+  bit 3,(IY+5)
+  jr nz,skipTextInvert
+  and (hl) ;to empty out the space.
+  or C  ;sprite data OR-ed.
+  ld (hl),a
+  inc hl
+  bit 6,(IY+5)
+  jr nz,doneInvertingText  ;skip drawing because of clip.
+;Register A already used. Can destruct now.
+  ld a,(hl)
+  and D ;MSB now.
+  or E
+  ld (hl),a
+doneInvertingText:
+  ld de,11 ;for next row. Takes the previous "inc hl" into account.
+  add hl,de
+ pop bc
+ inc IX
+ djnz TextDispLoop
+ bit 1,c    ;still contains TextFlags
+ ret z
+;Following is to clear a line below the text.
+ inc b
+ ld ix,nullPadByte
+ res 1,c     ;to prevent another iteration.
+ call TextDispLoop
+ ret
+
+;==================================
+skipTextInvert:
+ push af
+  and (hl)  ;this part, A=mask, C=sprite.
+  ld b,a
+  ld a,c
+  cpl
+  ld c,a
+ pop af
+ cpl
+ and C
+ or B
+ ld (hl),a
+ inc hl
+ bit 6,(IY+5)
+ jr nz,doneInvertingText
+;At this point, registers C and B are used up and are, now, destructible.
+ ld a,(hl) ;this part, D=mask, E=sprite
+ and D
+ ld b,a
+ ld a,e
+ cpl
+ ld e,a
+ ld a,D
+ cpl
+ and E
+ or B ;previous map. OR-ing sprite.
+ ld (hl),a
+ jr doneInvertingText
+ClipCalc: ;based on 8*8 sprite routine.
+;H=Y
+ ld a,h
+ sub 56
+ jr c,doneClipCalcMini  ;if carry (H too small), then quit clipping. No clip necessary.
+ cpl      ;OPTIMIZED: "NEG" == "CPL \ inc a". That increase is handled in the addition below. Saved 1 byte, 4 CCs. Also saved $15 on car insurance when I called Geiko :)
+ add a,9  ;invert on first 3 bits. *didn't say that right, but no other way...*
+ ld b,a
+doneClipCalcMini:
+ jp doneClipCalc
+nullPadByte:       ;this address used to set null byte in IX.
+.db $00
+;=================================================================================================
+;=================================================================================================
+;=================================================================================================
+;=================================================================================================
+;=================================================================================================
+;=================================================================================================
+;=================================================================================================
+;=================================================================================================
+
+
+textData:
+;data missing to reduce size
+;.db 4           ;  1F:
+;.db %10000000   ;2
+;.db %10000000   ;3
+;.db %10000000   ;4
+;.db %10000000   ;5
+;.db %10000000   ;6
+;
+.db 2           ;  20:
+.db %00000000   ;2
+.db %00000000   ;3
+.db %00000000   ;4
+.db %00000000   ;5
+.db %00000000   ;6
+
+.db 4           ;  21:
+.db %01000000   ;2
+.db %01000000   ;3
+.db %01000000   ;4
+.db %00000000   ;5
+.db %01000000   ;6
+
+.db 4           ;  22:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 6           ;  23:
+.db %01010000   ;2
+.db %11111000   ;3
+.db %01010000   ;4
+.db %11111000   ;5
+.db %01010000   ;6
+
+.db 4           ;  24:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  25:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  26:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 2           ;  27:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %10000000   ;4
+.db %00000000   ;5
+.db %00000000   ;6
+
+.db 4           ;  28:
+.db %00100000   ;2
+.db %01000000   ;3
+.db %01000000   ;4
+.db %01000000   ;5
+.db %00100000   ;6
+
+.db 4           ;  29:
+.db %01000000   ;2
+.db %00100000   ;3
+.db %00100000   ;4
+.db %00100000   ;5
+.db %01000000   ;6
+
+.db 6           ;  2A:
+.db %00100000   ;2
+.db %10101000   ;3
+.db %01110000   ;4
+.db %10101000   ;5
+.db %00100000   ;6
+
+.db 4           ;  2B:
+.db %00000000   ;2
+.db %01000000   ;3
+.db %11100000   ;4
+.db %01000000   ;5
+.db %00000000   ;6
+
+.db 3           ;  2C:
+.db %00000000   ;2
+.db %00000000   ;3
+.db %01000000   ;4
+.db %01000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  2D:
+.db %00000000   ;2
+.db %00000000   ;3
+.db %11100000   ;4
+.db %00000000   ;5
+.db %00000000   ;6
+
+.db 3           ;  2E:
+.db %00000000   ;2
+.db %00000000   ;3
+.db %00000000   ;4
+.db %11000000   ;5
+.db %11000000   ;6
+
+.db 4           ;  2F:
+.db %00100000   ;2
+.db %00100000   ;3
+.db %01000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  30:
+.db %01000000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %01000000   ;6
+
+.db 4           ;  31:
+.db %01000000   ;2
+.db %11000000   ;3
+.db %01000000   ;4
+.db %01000000   ;5
+.db %11100000   ;6
+
+.db 4           ;  32:
+.db %11000000   ;2
+.db %00100000   ;3
+.db %01000000   ;4
+.db %10000000   ;5
+.db %11100000   ;6
+
+.db 4           ;  33:
+.db %11000000   ;2
+.db %00100000   ;3
+.db %01000000   ;4
+.db %00100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  34:
+.db %10000000   ;2
+.db %10100000   ;3
+.db %11100000   ;4
+.db %00100000   ;5
+.db %00100000   ;6
+
+.db 4           ;  35:
+.db %11100000   ;2
+.db %10000000   ;3
+.db %11000000   ;4
+.db %00100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  36:
+.db %01100000   ;2
+.db %10000000   ;3
+.db %11100000   ;4
+.db %10100000   ;5
+.db %11100000   ;6
+
+.db 4           ;  37:
+.db %11100000   ;2
+.db %00100000   ;3
+.db %01000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  38:
+.db %11100000   ;2
+.db %10100000   ;3
+.db %11100000   ;4
+.db %10100000   ;5
+.db %11100000   ;6
+
+.db 4           ;  39:
+.db %11100000   ;2
+.db %10100000   ;3
+.db %11100000   ;4
+.db %00100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  3A:
+.db %01100000   ;2
+.db %01100000   ;3
+.db %00000000   ;4
+.db %01100000   ;5
+.db %01100000   ;6
+
+.db 4           ;  3B:
+.db %01100000   ;2
+.db %01100000   ;3
+.db %00000000   ;4
+.db %00100000   ;5
+.db %01100000   ;6
+
+.db 4           ;  3C:
+.db %00100000   ;2
+.db %01000000   ;3
+.db %10000000   ;4
+.db %01000000   ;5
+.db %00100000   ;6
+
+.db 4           ;  3D:
+.db %00000000   ;2
+.db %11100000   ;3
+.db %00000000   ;4
+.db %11100000   ;5
+.db %00000000   ;6
+
+.db 4           ;  3E:
+.db %10000000   ;2
+.db %01000000   ;3
+.db %00100000   ;4
+.db %01000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  3F:
+.db %11000000   ;2
+.db %00100000   ;3
+.db %01000000   ;4
+.db %00000000   ;5
+.db %01000000   ;6
+
+.db 4           ;  40:
+.db %00000000   ;2
+.db %00000000   ;3
+.db %00000000   ;4
+.db %00000000   ;5
+.db %00000000   ;6
+
+.db 4           ;  41:
+.db %01000000   ;2
+.db %10100000   ;3
+.db %11100000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  42:
+.db %11000000   ;2
+.db %10100000   ;3
+.db %11000000   ;4
+.db %10100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  43:
+.db %01100000   ;2
+.db %10000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %01100000   ;6
+
+.db 4           ;  44:
+.db %11000000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  45:
+.db %11100000   ;2
+.db %10000000   ;3
+.db %11000000   ;4
+.db %10000000   ;5
+.db %11100000   ;6
+
+.db 4           ;  46:
+.db %11100000   ;2
+.db %10000000   ;3
+.db %11000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  47:
+.db %01100000   ;2
+.db %10000000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %01100000   ;6
+
+.db 4           ;  48:
+.db %10100000   ;2
+.db %10100000   ;3
+.db %11100000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  49:
+.db %11100000   ;2
+.db %01000000   ;3
+.db %01000000   ;4
+.db %01000000   ;5
+.db %11100000   ;6
+
+.db 4           ;  4A:
+.db %11100000   ;2
+.db %00100000   ;3
+.db %00100000   ;4
+.db %00100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  4B:
+.db %10100000   ;2
+.db %10100000   ;3
+.db %11000000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  4C:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %11100000   ;6
+
+.db 4           ;  4D:
+.db %10100000   ;2
+.db %11100000   ;3
+.db %11100000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  4E:
+.db %11000000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  4F:
+.db %11100000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %11100000   ;6
+
+.db 4           ;  50:
+.db %11000000   ;2
+.db %10100000   ;3
+.db %11000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  51:
+.db %11100000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %11100000   ;5
+.db %01100000   ;6
+
+.db 4           ;  52:
+.db %11000000   ;2
+.db %10100000   ;3
+.db %11000000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  53:
+.db %01100000   ;2
+.db %10000000   ;3
+.db %01000000   ;4
+.db %00100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  54:
+.db %11100000   ;2
+.db %01000000   ;3
+.db %01000000   ;4
+.db %01000000   ;5
+.db %01000000   ;6
+
+.db 4           ;  55:
+.db %10100000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %11100000   ;6
+
+.db 4           ;  56:
+.db %10100000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %01000000   ;6
+
+.db 4           ;  57:
+.db %10100000   ;2
+.db %10100000   ;3
+.db %11100000   ;4
+.db %11100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  58:
+.db %10100000   ;2
+.db %10100000   ;3
+.db %01000000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  59:
+.db %10100000   ;2
+.db %10100000   ;3
+.db %01000000   ;4
+.db %01000000   ;5
+.db %01000000   ;6
+
+.db 4           ;  5A:
+.db %11100000   ;2
+.db %00100000   ;3
+.db %01000000   ;4
+.db %10000000   ;5
+.db %11100000   ;6
+
+.db 4           ;  5B:
+.db %01000000   ;2
+.db %10100000   ;3
+.db %11100000   ;4
+.db %10100000   ;5
+.db %01000000   ;6
+
+.db 4           ;  5C:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %01000000   ;4
+.db %00100000   ;5
+.db %00100000   ;6
+
+.db 4           ;  5D:
+.db %01100000   ;2
+.db %00100000   ;3
+.db %00100000   ;4
+.db %00100000   ;5
+.db %01100000   ;6
+
+.db 4           ;  5E:
+.db %01000000   ;2
+.db %10100000   ;3
+.db %00000000   ;4
+.db %00000000   ;5
+.db %00000000   ;6
+
+.db 4           ;  5F:
+.db %00000000   ;2
+.db %00000000   ;3
+.db %00000000   ;4
+.db %00000000   ;5
+.db %11110000   ;6
+
+.db 3           ;  60:
+.db %10000000   ;2
+.db %01000000   ;3
+.db %00000000   ;4
+.db %00000000   ;5
+.db %00000000   ;6
+
+.db 4           ;  61:
+.db %00000000   ;2
+.db %01100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %01100000   ;6
+
+.db 4           ;  62:
+.db %10000000   ;2
+.db %11000000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  63:
+.db %00000000   ;2
+.db %01100000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %01100000   ;6
+
+.db 4           ;  64:
+.db %00100000   ;2
+.db %01100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %01100000   ;6
+
+.db 4           ;  65:
+.db %00000000   ;2
+.db %01000000   ;3
+.db %10100000   ;4
+.db %11000000   ;5
+.db %01100000   ;6
+
+.db 3           ;  66:
+.db %01000000   ;2
+.db %10000000   ;3
+.db %11000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  67:
+.db %01100000   ;2
+.db %10100000   ;3
+.db %01100000   ;4
+.db %00100000   ;5
+.db %11000000   ;6
+
+.db 4           ;  68:
+.db %10000000   ;2
+.db %11000000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 2           ;  69:
+.db %10000000   ;2
+.db %00000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  6A:
+.db %00100000   ;2
+.db %00000000   ;3
+.db %00100000   ;4
+.db %10100000   ;5
+.db %01000000   ;6
+
+.db 4           ;  6B:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %10100000   ;4
+.db %11000000   ;5
+.db %10100000   ;6
+
+.db 3           ;  6C:
+.db %11000000   ;2
+.db %01000000   ;3
+.db %01000000   ;4
+.db %01000000   ;5
+.db %01000000   ;6
+
+.db 6           ;  6D:
+.db %00000000   ;2
+.db %11010000   ;3
+.db %10101000   ;4
+.db %10001000   ;5
+.db %10001000   ;6
+
+.db 4           ;  6E:
+.db %00000000   ;2
+.db %11000000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %10100000   ;6
+
+.db 4           ;  6F:
+.db %00000000   ;2
+.db %01000000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %01000000   ;6
+
+.db 4           ;  70:
+.db %00000000   ;2
+.db %11000000   ;3
+.db %10100000   ;4
+.db %11000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  71:
+.db %00000000   ;2
+.db %01100000   ;3
+.db %10100000   ;4
+.db %01100000   ;5
+.db %00100000   ;6
+
+.db 4           ;  72:
+.db %00000000   ;2
+.db %10100000   ;3
+.db %11000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 3           ;  73:
+.db %00000000   ;2
+.db %11000000   ;3
+.db %10000000   ;4
+.db %01000000   ;5
+.db %11000000   ;6
+
+.db 3           ;  74:
+.db %10000000   ;2
+.db %11000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %01000000   ;6
+
+.db 4           ;  75:
+.db %00000000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %10100000   ;5
+.db %11100000   ;6
+
+.db 4           ;  76:
+.db %00000000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %01000000   ;5
+.db %01000000   ;6
+
+.db 6           ;  77:
+.db %00000000   ;2
+.db %10001000   ;3
+.db %10001000   ;4
+.db %10101000   ;5
+.db %01010000   ;6
+
+.db 4           ;  78:
+.db %00000000   ;2
+.db %10100000   ;3
+.db %01000000   ;4
+.db %01000000   ;5
+.db %10100000   ;6
+
+.db 4           ;  79:
+.db %00000000   ;2
+.db %10100000   ;3
+.db %10100000   ;4
+.db %01000000   ;5
+.db %10000000   ;6
+
+.db 5           ;  7A:
+.db %00000000   ;2
+.db %11110000   ;3
+.db %00100000   ;4
+.db %01000000   ;5
+.db %11110000   ;6
+
+.db 4           ;  7B:
+.db %01100000   ;2
+.db %01000000   ;3
+.db %10000000   ;4
+.db %01000000   ;5
+.db %01100000   ;6
+
+.db 2           ;  7C:
+.db %10000000   ;2
+.db %10000000   ;3
+.db %10000000   ;4
+.db %10000000   ;5
+.db %10000000   ;6
+
+.db 4           ;  7D:
+.db %11000000   ;2
+.db %01000000   ;3
+.db %00100000   ;4
+.db %01000000   ;5
+.db %11000000   ;6
+
+;.db 5           ;  7E:  ;Missing data to represent boundry here
+;.db %01010000   ;2
+;.db %10100000   ;3
+;.db %00000000   ;4
+;.db %00000000   ;5
+;.db %00000000   ;6
+
+.echo "Module _CFONT6H size is "
+.echo $-CFont6h.z80
+.echo " bytes\n"

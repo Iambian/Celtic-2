@@ -1,0 +1,81 @@
+#define inc_hex.z80
+;Read and write all inputs and outputs from Op6
+;
+;To convert single letter of text to single number, use "CALL TextNumInA"
+;To convert single number to single letter of text, use "CALL NumTextInA"
+;Both routines start with 'A' to work with.
+;Original routine used to convert hex to text and vice-versa, but there are
+;no checks made for any invalid input, so any higher letter should give appropriate increases.
+; Calls:
+;ConvertTtoH -- text at (Op6) to hex HL
+;ConvertSumSub -- text at (de) to hex A
+;ConvertHtoT1b -- hex A to text (Op6)
+;ConvertHtoT2b -- hex HL to txt (Op6)
+;NumTextInA -- Number to text by nibble (reg A for in and out)
+;TextNuminA -- Text to number by nibble (reg A for in and out)
+;For nibbles, none of the routines account for overflow or underflow.
+
+ConvertTtoH:  ;text to hexadecimal HL
+ push de \ push bc
+ ld de,Op6
+ConvertTtoHLoop:
+ call ConvertSumSub
+ ld h,a
+ call ConvertSumSub
+ ld l,a
+ pop bc \ pop de
+ ret
+ConvertSumSub:
+ call convertSub
+ ld b,a
+ sla b \ sla b \ sla b \ sla b
+ call convertSub
+ and 00001111b
+ or b
+ ret
+ConvertSub:
+ ld a,(de)
+ inc de
+TextNumInA:
+ cp 'A'
+ jr c,$+4
+ sub 7
+ sub '0'
+ ret
+ConvertHtoT1b:  ;hexadecimal to text in Op6 from A. Preserves ALL.
+ push af \ push hl \ push de
+ ld (Op6),a
+ ld hl,Op6
+ xor a \ rld \ ld e,a \ rld \ ld d,a \ rld
+ ld hl,Op6
+ ld a,e
+ call ConvertHtoTSub
+ ld a,d
+ call ConvertHtoTSub
+ pop de \ pop hl \ pop af
+ ret
+ConvertHtoT2b:  ;hexadecimal to text in Op6 from HL. Preserves ALL. Call to convert 2 bytes of Hexadecimal
+ push af \ push hl \ push de
+ ld a,L
+ call ConvertHtoT1b
+ ld a,h
+ ld hl,Op6
+ ld de,Op6+2    ;moving LSB of text data to Op6+2 for proper read
+ ldi
+ ldi
+ call ConvertHtoT1b
+ xor a
+ ld (Op6+4),a
+ pop de \ pop hl \ pop af
+ ret
+ConvertHtoTSub:
+ call NumTextInA
+ ld (hl),a
+ inc hl
+ ret
+NumTextInA:
+ add a,'0'
+ cp '9'+1
+ ret c
+ add a,7
+ ret

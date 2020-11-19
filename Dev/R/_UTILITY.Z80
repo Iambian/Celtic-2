@@ -1,0 +1,459 @@
+;Iambian's Utilitarian chunk of code necessary for an assembler
+; -- All pieces of code will be clearly labelled with comments
+;    speckled around the code as if they were little... sprinkles :)
+;    ... yum... :)
+;
+#define inc_utility.z80
+utility.z80:
+clearbuf:
+ di
+ push hl
+ push bc
+ ld (temp1),SP
+ ld SP,scrnBuf+$300
+ ld b,64
+clearbufcommon:
+ ld hl,0
+ push hl
+ push hl
+ push hl
+ push hl
+ push hl
+ push hl
+ djnz $-6
+ ld SP,(temp1)
+ pop bc
+ pop hl
+ ret
+clearbufinhl:
+ di
+ push hl
+ push bc
+ ld (temp1),SP
+ ld bc,$300
+ add hl,bc
+ ld SP,hl
+ jr clearbufcommon-2  ;load in the register "B" as well
+clearcenter:
+ di
+ push hl
+ push bc
+ ld (temp1),SP
+ ld SP,scrnbuf+($300-96)
+ ld b,49
+ jr clearbufcommon  ;saving space by re-using above loop and HL init.
+clearlastlineinapp:
+ di
+ push hl
+ push bc
+ ld (temp1),SP
+ ld b,1
+ ld SP,appbackupscreen+$300
+ jp clearbufcommon
+
+pressanykey:
+ push bc  ;saving the registers that will be destroyed by this routine.
+  push af
+   call _getKBD
+   jr z,$-3    ;loop until key is pressed
+   call _getKBD
+   jr nz,$-3   ;loop until key is released
+  pop af
+ pop bc
+ ret
+;savescreen:
+; push bc \ push de \ push hl
+;    call sscrnady
+;    ex de,hl
+;    ldir
+; pop hl  \ pop de  \ pop bc
+; ret
+;loadscreen:
+; push bc \ push de \ push hl
+;    call sscrnady
+;    ldir
+; pop hl  \ pop de  \ pop bc
+; ret
+;sscrnady:
+; ld de,plotsscreen+96
+; ld hl,savesscreen+168
+; ld bc,768-168
+; ret
+;=================================
+;box menu part copied down.
+brpos     equ temp2
+b.bitmask equ temp3
+lLine     equ temp4
+rLine     equ temp5
+box.z80:
+;bottom-right=HL top-left=DE
+drawbox:
+ ld a,$FF
+ ld (b.bitmask),a
+ jr $+6
+clearbox:
+ xor a
+ ld (b.bitmask),a
+
+ ld a,d
+ sra a
+ sra a
+ sra a
+ ld c,a
+ ld a,h
+ sra a
+ sra a
+ sra a
+ sub c
+ ld (temp1),a
+ or a
+ sbc hl,de
+ ld (height),hl
+ add hl,de
+ push de
+  call calcBOffset
+  ld c,a
+;  ld (temp1),hl  ;this information need not be saved; will not be used again.
+ pop hl
+ call calcBOffset
+ ld (brpos),hl
+ ld b,a
+ 
+ ld a,(b.bitmask)
+ ld l,a
+ and 10000000b
+ ld h,a
+ ld a,b
+ or a
+ jr z,$+8
+ srl H
+ srl L
+ djnz $-4
+ 
+ ld (lLine),hl
+ ld a,c
+ cpl
+ add a,8
+ ld b,a
+
+ ld a,(b.bitmask)
+ ld l,a
+ and 00000001b
+ ld h,a
+ ld a,b
+ or a
+ jr z,$+8
+ sla H
+ sla L
+ djnz $-4
+
+ ld (rLine),hl
+ ld hl,(height)
+ ld a,(temp1)
+ ld h,a
+ cpl
+ add a,13
+; sub c
+ ld c,h
+ ld b,a
+ ld (temp1),bc
+ dec l
+; dec l
+ ld b,l
+ ld hl,(brpos)
+ push bc
+  call drawtopline
+ pop bc
+ push bc
+  call drawsidelines
+ pop bc
+ djnz $-5
+ jp drawtopline
+
+calcBOffset:
+ ld a,h
+ ld h,0
+ add hl,hl
+ add hl,hl
+ ld e,l
+ ld d,h
+ add hl,hl
+ add hl,de
+ ld de,scrnBuf
+ add hl,de
+ ld e,a
+ xor a
+ ld d,a  ;clear out register D
+ rr e
+ rra
+ rr e
+ rra
+ rr e
+ rra
+ rlca
+ rlca
+ rlca
+ add hl,de
+ ret
+;(temp3+1)=shadedline
+drawtopline:
+;(temp1+1)=abs((temp1)-12)
+ ld bc,(temp1)
+; dec c  ;corrective measure
+ ld a,(lLine)
+ or (hl)
+ ld (hl),a
+ inc hl
+ ld a,$FF
+ dec c
+ jr z,$+7
+ ld (hl),a
+ inc hl
+ dec c
+ jr nz,$-3
+ ld a,(rLine)
+ or (hl)
+ ld (hl),a
+ inc hl
+ djnz $-1
+ ret
+drawsidelines:
+ ld bc,(temp1)
+; dec c  ;corrective measures. Again.
+ ld de,(lLine)
+ ld a,e
+ cpl
+ and (hl)
+ or d
+ ld (hl),a
+ inc hl
+ xor a
+ dec c
+ jr z,$+7
+ ld (hl),a
+ inc hl
+ dec c
+ jr nz,$-3
+ ld de,(rLine)
+ ld a,e
+ cpl
+ and (hl)
+ or d
+ ld (hl),a
+ inc hl
+ djnz $-1
+ ret
+
+;Generate dialog box
+;A=line to highlight ($FF or equivalently high number = don't highlight)
+;HL=Pointer to data stream
+;X,Y (topleft). X,Y (bottom-right). double-zero-terminated strings
+dispdialog:
+ di
+ ld d,(hl)
+ inc hl
+ ld e,(hl)
+ inc hl
+ ld b,(hl)
+ inc hl
+ ld c,(hl)
+ inc hl
+dispdialogcont:
+ push af
+  ld a,d
+  inc a
+  inc a
+  ld (textmargin),a
+  ld (textMem),a
+  ld a,e
+  inc a
+  inc a
+  ld (textMem+1),a
+  push hl
+   ld h,b
+   ld l,c
+   call drawbox
+  pop hl
+ pop af
+ ld c,0
+ ld b,a
+dispdialog2:
+ ld a,01110101b   ;bits for erasebelow,inverse,eraseabove respectively.
+ and (IY+5)
+ ld (IY+5),a
+ ld a,b
+ cp c
+ jr nz,dispdialog3
+ ld a,10001010b   ;bits for erasebelow,inverse,eraseabove respectively.
+ or (IY+5)
+ ld (IY+5),a
+ ld a,(textMem+1)
+ dec a
+ ld (textMem+1),a
+ call VPuts2
+ ld a,(textMem+1)
+ inc a
+ ld (textMem+1),a
+ jr $+5
+dispdialog3:
+ call VPuts2
+ xor a
+ cp (hl)
+ jr z,$+5
+ inc c
+ jr dispdialog2
+ call fastcopy
+ inc hl
+ ret
+ 
+;box menu part end here
+;==============================
+ 
+;HL=pointer to string of data.
+;Data: .db MenuIDNumber .db NumberOfOptions .dw PointerToMenuBoxData .dw AddressesToJumpToOnOptionInSequentialOrder
+;X,Y (topleft). X,Y (bottom-right). double-zero-terminated strings
+;
+;
+boxmenu:
+ set textEraseAbove,(IY+5)
+ set textEraseBelow,(IY+5)
+ ld a,(hl)
+ inc hl
+ ld (menuid),a
+ ld c,(hl)
+ inc hl
+ ld e,(hl)
+ inc hl
+ ld d,(hl)
+ inc hl
+ ld b,0
+ push hl
+boxmenuloop:
+  ld a,b
+  ex de,hl
+  push hl
+   push bc
+    call dispdialog
+   pop bc
+  pop de
+  push bc 
+   ld bc,15000
+   dec bc
+   ld a,c
+   or b
+   jr nz,$-3  ;delay routine to prevent too fast of a cursor movement.  
+   call _getKBD
+   or a
+   jr z,$-4
+  pop bc
+  cp $04
+  jr nz,$+9  ;up
+  ld a,b
+  or a
+  jr z,boxmenuloopend
+  dec b
+  jr boxmenuloopend
+  cp $01 
+  jr nz,$+9  ;down
+  ld a,b
+  cp c
+  jr nc,boxmenuloopend
+  inc b
+  jr boxmenuloopend
+  cp $38
+  jr nz,$+5  ;DEL. Automatically selects last item
+  ld b,c
+  jr boxmenuloopstop
+  cp $36 
+  jr nz,$+4   ;2nd key to select item
+  jr boxmenuloopstop  ;select the item
+  cp $09 
+  jr nz,$+4
+  jr boxmenuloopstop  ;ENTER to select item. Same deal, but keep compatibility with users stuffs.
+;F1=$35 F2=$34 F3=$33 F4=$32 F5=$31
+  jr boxmenuloopend
+boxmenumiddle:
+   pop bc
+  pop de
+boxmenuloopend:
+  jr boxmenuloop
+boxmenuloopstop:
+ pop de
+ push bc
+  call _getKBD
+  or a
+  jr nz,$-4   ;wait for the user to let go of the key before continuing
+ pop bc
+ ld a,b
+ ld (menuoption),a   ;saves this into variable for next routine to see what it was.
+ ld l,b
+ ld h,0
+ add hl,hl   ;double option to show correct offset
+ add hl,de   ;add to address to show correct pointer to address form.
+ ld a,(hl)
+ inc hl
+ ld h,(hl)
+ ld l,a
+ ld a,b
+ ret     ;let the calling routine figure out what to do with the address in HL.
+;What the calling routine can do is do a JP (HL), but it's up to the routine as to what it should do with it.
+dispheaders:   ;routine that puts the header and footer of the screen onto the ... screen.
+ ld hl,0
+ ld (textMem),hl
+ ld hl,Title
+ ld a,10001010b   ;bits for erasebelow,inverse,eraseabove respectively.
+ or (IY+5)
+ ld (IY+5),a
+ call VPuts2
+ ld hl,$3900
+ ld (textMem),hl
+ ld hl,Copyright
+ call VPuts2
+ res TextEraseAbove,(IY+5)
+ res TextEraseBelow,(IY+5)
+ ret
+
+ 
+;From fastcopy routine    
+showgraph:
+ di
+ exx
+ ld	a,$80				; 7
+ out	($10),a				; 11
+ out	($20),a				; 11  Sets first two bits to zero to slow calc down if 83pse/84xx
+ ld a,(iterations)
+ bit 0,a
+ jr nz,$+7
+ ld hl,savesscreen-12-(-(12*64)+1)
+ jr $+5
+ ld hl,appbackupscreen-12-(-(12*64)+1)
+ ld	a,$20				; 7
+ ld	c,a				; 4
+ inc	hl				; 6 waste
+ dec	hl				; 6 waste
+showgraphAgain:
+ ld	b,64				; 7
+ inc	c				; 4
+ ld	de,-(12*64)+1			; 10
+ out	($10),a				; 11
+ add	hl,de				; 11
+ ld	de,10				; 10
+showgraphLoop:
+ add	hl,de				; 11
+ inc	hl				; 6 waste
+ inc	hl				; 6 waste
+ inc	de				; 6
+ ld	a,(hl)				; 7
+ out	($11),a				; 11
+ dec	de				; 6
+ djnz	showgraphLoop			; 13/8
+ ld	a,c				; 4
+ cp	$2B+1				; 7
+ jr	nz,showgraphAgain		; 10/1
+ exx
+ ret
+
+
+.echo "Module _UTILITY size is "
+.echo $-utility.z80
+.echo " bytes\n"
