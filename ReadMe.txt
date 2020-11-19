@@ -12,6 +12,8 @@ WITH WORD-WRAP ENABLED.
 ______________
 Introduction:|
 -------------/
+EDIT 2020: THIS PROJECT EXISTS ON GITHUB ONLY FOR ARCHIVAL PURPOSES.
+
 This is a toolkit for BASIC programs designed to edit or pull together
 other BASIC programs into a custom-made file that is ready for
 execution. It features the ability to read lines from either RAM or
